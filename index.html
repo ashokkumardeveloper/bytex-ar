@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+    <style>
+      #volumeToggle {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 12px 16px;
+        border-radius: 50%;
+        font-size: 24px;
+        z-index: 999;
+        cursor: pointer;
+        display: none; /* Hidden initially */
+      }
+
+      /* Force-hide fullscreen/VR button */
+      .a-enter-vr-button {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+
+    <!-- Volume Icon -->
+    <div id="volumeToggle">🔇</div>
+
+    <!-- AR Scene -->
+    <a-scene
+      mindar-image="imageTargetSrc: targets.mind;"
+      vr-mode-ui="enabled: false"
+      device-orientation-permission-ui="enabled: false">
+
+      <!-- Camera -->
+      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+      <!-- Video Asset -->
+      <a-assets>
+        <video id="myVideo"
+               src="soundvideo.mp4"
+               autoplay
+               loop
+               playsinline
+               webkit-playsinline
+               preload="auto">
+        </video>
+      </a-assets>
+
+      <!-- Target Entity -->
+      <a-entity id="marker" mindar-image-target="targetIndex: 0">
+        <a-video
+          src="#myVideo"
+          width="1"
+          height="0.5625"
+          position="0 0 0"
+          rotation="0 0 0">
+        </a-video>
+      </a-entity>
+    </a-scene>
+
+    <!-- Script -->
+    <script>
+      window.addEventListener("DOMContentLoaded", () => {
+        const video = document.querySelector("#myVideo");
+        const marker = document.querySelector("#marker");
+        const volumeBtn = document.getElementById("volumeToggle");
+
+        video.muted = true; // Initially muted
+        let markerVisible = false;
+
+        // Marker found
+        marker.addEventListener("targetFound", () => {
+          markerVisible = true;
+          video.play();
+          volumeBtn.style.display = "block";
+        });
+
+        // Marker lost
+        marker.addEventListener("targetLost", () => {
+          markerVisible = false;
+          video.pause();
+          volumeBtn.style.display = "none";
+        });
+
+        // Volume toggle
+        volumeBtn.addEventListener("click", () => {
+          video.muted = !video.muted;
+          volumeBtn.textContent = video.muted ? "🔇" : "🔊";
+          video.play(); // Ensure playback
+        });
+
+        // Fallback force-hide VR button
+        const style = document.createElement("style");
+        style.innerHTML = `
+          .a-enter-vr-button {
+            display: none !important;
+          }
+        `;
+        document.head.appendChild(style);
+      });
+    </script>
+  </body>
+</html>
