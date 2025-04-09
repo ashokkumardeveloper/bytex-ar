@@ -1,107 +1,308 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+        "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
+      }
+    }
+    </script>
     <style>
-      #volumeToggle {
-        position: absolute;
-        top: 20px;
-        right: 20px;
-        background: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 12px 16px;
-        border-radius: 50%;
-        font-size: 24px;
-        z-index: 999;
-        cursor: pointer;
-        display: none; /* Hidden initially */
+      body {
+        margin: 0;
+        font-family: sans-serif;
       }
 
-      /* Force-hide fullscreen/VR button */
-      .a-enter-vr-button {
-        display: none !important;
+      #container {
+        width: 100vw;
+        height: 100vh;
+        position: relative;
+        overflow: hidden;
+      }
+
+      #startButton {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 15px 30px;
+        font-size: 18px;
+        font-weight: bold;
+        border: none;
+        border-radius: 30px;
+        background: linear-gradient(135deg, #00c6ff, #0072ff);
+        color: white;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        cursor: pointer;
+        z-index: 10;
+        transition: 0.3s;
+      }
+
+      #startButton:hover {
+        transform: translate(-50%, -50%) scale(1.05);
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+      }
+
+      #loadingMessage {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: white;
+        font-size: 18px;
+        background-color: rgba(0, 0, 0, 0.7);
+        padding: 12px 24px;
+        border-radius: 8px;
+        display: none;
+        z-index: 5;
       }
     </style>
   </head>
   <body>
+    <div id="container"></div>
+    <button id="startButton">Start AR Experience</button>
+    <script type="module">
+      import * as THREE from 'three';
+      import { MindARThree } from 'mindar-image-three';
+      import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-    <!-- Volume Icon -->
-    <div id="volumeToggle">🔇</div>
+      const startButton = document.querySelector("#startButton");
 
-    <!-- AR Scene -->
-    <a-scene
-      mindar-image="imageTargetSrc: targets.mind;"
-      vr-mode-ui="enabled: false"
-      device-orientation-permission-ui="enabled: false">
+      // Create MindAR instance
+      const mindarThree = new MindARThree({
+        container: document.querySelector("#container"),
+        imageTargetSrc: "targets.mind",
+        uiScanning: "yes",
+        uiLoading: "yes"
+      });
 
-      <!-- Camera -->
-      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+      const { renderer, scene, camera } = mindarThree;
 
-      <!-- Video Asset -->
-      <a-assets>
-        <video id="myVideo"
-               src="soundvideo.mp4"
-               autoplay
-               loop
-               playsinline
-               webkit-playsinline
-               preload="auto">
-        </video>
-      </a-assets>
+      // Enable shadows for more realism
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-      <!-- Target Entity -->
-      <a-entity id="marker" mindar-image-target="targetIndex: 0">
-        <a-video
-          src="#myVideo"
-          width="1"
-          height="0.5625"
-          position="0 0 0"
-          rotation="0 0 0">
-        </a-video>
-      </a-entity>
-    </a-scene>
+      // Add subtle ambient light to create realistic paper feel
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(ambientLight);
 
-    <!-- Script -->
-    <script>
-      window.addEventListener("DOMContentLoaded", () => {
-        const video = document.querySelector("#myVideo");
-        const marker = document.querySelector("#marker");
-        const volumeBtn = document.getElementById("volumeToggle");
+      // Add directional light to create subtle shadows
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.4);
+      directionalLight.position.set(0, 5, 5);
+      directionalLight.castShadow = true;
+      scene.add(directionalLight);
 
-        video.muted = true; // Initially muted
-        let markerVisible = false;
+      // Configure shadow properties
+      directionalLight.shadow.mapSize.width = 1024;
+      directionalLight.shadow.mapSize.height = 1024;
+      directionalLight.shadow.camera.near = 0.5;
+      directionalLight.shadow.camera.far = 50;
 
-        // Marker found
-        marker.addEventListener("targetFound", () => {
-          markerVisible = true;
-          video.play();
-          volumeBtn.style.display = "block";
+      const anchor = mindarThree.addAnchor(0);
+
+      // Create video element
+      const video = document.createElement("video");
+      video.src = "soundvideo.mp4";
+      video.crossOrigin = "anonymous";
+      video.loop = true;
+      video.playsInline = true;
+      video.muted = false;
+      video.style.display = "none";
+      document.body.appendChild(video);
+
+      // Create printGroup in advance to add elements later
+      const printGroup = new THREE.Group();
+      anchor.group.add(printGroup);
+
+      // Function to calculate aspect ratio and create appropriate planes
+      // to fill the target image while maintaining video aspect ratio
+      function createPlanes() {
+        // Get video's natural dimensions once loaded
+        const videoWidth = video.videoWidth;
+        const videoHeight = video.videoHeight;
+        const videoAspect = videoWidth / videoHeight;
+
+        console.log(`Video dimensions: ${videoWidth}x${videoHeight}, Aspect: ${videoAspect}`);
+
+        // MindAR target image is a normalized 1x1 unit in the scene
+        // We want to fill this completely while maintaining video aspect ratio
+        let planeWidth, planeHeight;
+
+        // Fill the target completely
+        if (videoWidth > videoHeight) {
+          // Landscape video - fill width and adjust height
+          planeWidth = 1;
+          planeHeight = 1 / videoAspect;
+        } else {
+          // Portrait or square video - fill height and adjust width
+          planeHeight = 1;
+          planeWidth = videoAspect;
+        }
+
+        console.log(`Plane dimensions: ${planeWidth}x${planeHeight}`);
+
+        // Remove any existing planes
+        while(printGroup.children.length > 0) {
+          printGroup.remove(printGroup.children[0]);
+        }
+
+        // Create video texture
+        const videoTexture = new THREE.VideoTexture(video);
+        videoTexture.encoding = THREE.sRGBEncoding;
+
+        // Adjust video appearance for realism
+        const videoMaterial = new THREE.MeshStandardMaterial({
+          map: videoTexture,
+          roughness: 0.85,  // Paper-like roughness
+          metalness: 0.0,   // No metallic look
+          side: THREE.FrontSide,
+          transparent: true,
+          opacity: 0.98     // Slight transparency for realism
         });
 
-        // Marker lost
-        marker.addEventListener("targetLost", () => {
-          markerVisible = false;
-          video.pause();
-          volumeBtn.style.display = "none";
+        // Create plane with slight offset to prevent z-fighting
+        const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
+        const videoPlane = new THREE.Mesh(geometry, videoMaterial);
+        videoPlane.position.z = 0.001; // Minimal offset to prevent z-fighting
+        videoPlane.receiveShadow = true;
+
+        // Create a subtle paper texture effect underneath
+        const paperGeometry = new THREE.PlaneGeometry(planeWidth * 1.02, planeHeight * 1.02);
+        const paperMaterial = new THREE.MeshStandardMaterial({
+          color: 0xffffff,
+          roughness: 0.9,    // Very paper-like roughness
+          metalness: 0.0,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.6
         });
 
-        // Volume toggle
-        volumeBtn.addEventListener("click", () => {
-          video.muted = !video.muted;
-          volumeBtn.textContent = video.muted ? "🔇" : "🔊";
-          video.play(); // Ensure playback
+        const paperPlane = new THREE.Mesh(paperGeometry, paperMaterial);
+        paperPlane.position.z = -0.001; // Slightly behind
+        paperPlane.receiveShadow = true;
+
+        // Add subtle bevel/edge to paper for realism
+        const edgeGeometry = new THREE.BoxGeometry(planeWidth * 1.04, planeHeight * 1.04, 0.008);
+        const edgeMaterial = new THREE.MeshStandardMaterial({
+          color: 0xeeeeee,
+          roughness: 0.7,
+          metalness: 0.0
         });
 
-        // Fallback force-hide VR button
-        const style = document.createElement("style");
-        style.innerHTML = `
-          .a-enter-vr-button {
-            display: none !important;
+        const edge = new THREE.Mesh(edgeGeometry, edgeMaterial);
+        edge.position.z = -0.004;
+        edge.receiveShadow = true;
+        edge.castShadow = true;
+
+        // Add the elements to the group
+        printGroup.add(edge);
+        printGroup.add(paperPlane);
+        printGroup.add(videoPlane);
+
+        // Scale the entire group to fill the target image
+        // For landscape videos, scale up height to fill target's height
+        // For portrait videos, scale up width to fill target's width
+        if (videoWidth > videoHeight) {
+          // Landscape video - scale up to fill height
+          const scale = 1 / planeHeight;
+          printGroup.scale.set(scale, scale, scale);
+        } else {
+          // Portrait or square video - scale up to fill width
+          const scale = 1 / planeWidth;
+          printGroup.scale.set(scale, scale, scale);
+        }
+      }
+
+      // Event listener for video to detect when metadata is loaded
+      video.addEventListener('loadedmetadata', () => {
+        console.log("Video metadata loaded");
+        createPlanes();
+      });
+
+      // Video control on target detection
+      anchor.onTargetFound = () => {
+        console.log("Target found");
+
+        // Add subtle animation for appearing
+        const currentScale = printGroup.scale.x;
+        printGroup.scale.set(currentScale * 0.95, currentScale * 0.95, currentScale * 0.95);
+        printGroup.rotation.x = -0.05;
+
+        // Animate to normal scale
+        const targetScale = printGroup.scale.x / 0.95;
+        const appearTween = () => {
+          printGroup.scale.x += (targetScale - printGroup.scale.x) * 0.1;
+          printGroup.scale.y += (targetScale - printGroup.scale.y) * 0.1;
+          printGroup.scale.z += (targetScale - printGroup.scale.z) * 0.1;
+          printGroup.rotation.x += (0 - printGroup.rotation.x) * 0.1;
+
+          if (Math.abs(targetScale - printGroup.scale.x) > 0.001) {
+            requestAnimationFrame(appearTween);
           }
-        `;
-        document.head.appendChild(style);
+        };
+
+        appearTween();
+
+        // Play video with slight delay for realism
+        setTimeout(() => {
+          video.play().catch(e => {
+            console.warn("Autoplay blocked. User interaction may be required.");
+          });
+        }, 300);
+      };
+
+      anchor.onTargetLost = () => {
+        console.log("Target lost");
+        video.pause();
+      };
+
+      // Add subtle movement to simulate paper physicality
+      let phase = 0;
+      const subtleMovement = () => {
+        phase += 0.01;
+        if (anchor.visible) {
+          printGroup.position.y = Math.sin(phase) * 0.003;
+          printGroup.rotation.z = Math.sin(phase * 0.7) * 0.003;
+          printGroup.rotation.x = Math.sin(phase * 0.5) * 0.003;
+        }
+        requestAnimationFrame(subtleMovement);
+      };
+
+      subtleMovement();
+
+      // Pre-load video to get dimensions
+      video.load();
+
+      // Start AR
+      const start = async () => {
+        startButton.style.display = "none";
+
+        try {
+          await mindarThree.start();
+
+          renderer.setAnimationLoop(() => {
+            renderer.render(scene, camera);
+          });
+        } catch (err) {
+          console.error("Error starting AR:", err);
+          alert("Error starting AR experience. Please ensure camera permissions are granted and try again.");
+          startButton.style.display = "block";
+        }
+      };
+
+      startButton.addEventListener("click", start);
+
+      // Handle resize
+      window.addEventListener("resize", () => {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        renderer.setSize(width, height);
       });
     </script>
   </body>
