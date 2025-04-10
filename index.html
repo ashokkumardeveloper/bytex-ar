@@ -70,111 +70,81 @@
       import { MindARThree } from 'mindar-image-three';
       import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+      const params = new URLSearchParams(window.location.search);
+      const targetSrc = params.get("target"); // .mind file
+      const videoMapJSON = params.get("videos"); // should be JSON stringified object
+
+      // Example: videos={"0":"video1.mp4", "1":"video2.mp4", "2":"video3.mp4"}
+      const videoMap = JSON.parse(videoMapJSON || "{}");
+
       const startButton = document.querySelector("#startButton");
 
-      // Create MindAR instance
       const mindarThree = new MindARThree({
         container: document.querySelector("#container"),
-        imageTargetSrc: "targets.mind",
+        imageTargetSrc: targetSrc,
         uiScanning: "yes",
         uiLoading: "yes"
       });
 
       const { renderer, scene, camera } = mindarThree;
 
-      // Enable shadows for more realism
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-      // Add subtle ambient light to create realistic paper feel
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
       scene.add(ambientLight);
 
-      // Add directional light to create subtle shadows
       const directionalLight = new THREE.DirectionalLight(0xffffff, 0.4);
       directionalLight.position.set(0, 5, 5);
       directionalLight.castShadow = true;
       scene.add(directionalLight);
 
-      // Configure shadow properties
       directionalLight.shadow.mapSize.width = 1024;
       directionalLight.shadow.mapSize.height = 1024;
       directionalLight.shadow.camera.near = 0.5;
       directionalLight.shadow.camera.far = 50;
 
-      const anchor = mindarThree.addAnchor(0);
+      const anchors = [];
+      const videos = [];
+      const printGroups = [];
 
-      // Create video element
-      const video = document.createElement("video");
-      video.src = "soundvideo.mp4";
-      video.crossOrigin = "anonymous";
-      video.loop = true;
-      video.playsInline = true;
-      video.muted = false;
-      video.style.display = "none";
-      document.body.appendChild(video);
-
-      // Create printGroup in advance to add elements later
-      const printGroup = new THREE.Group();
-      anchor.group.add(printGroup);
-
-      // Function to calculate aspect ratio and create appropriate planes
-      // to fill the target image while maintaining video aspect ratio
-      function createPlanes() {
-        // Get video's natural dimensions once loaded
+      const createPlanes = (video, group) => {
         const videoWidth = video.videoWidth;
         const videoHeight = video.videoHeight;
         const videoAspect = videoWidth / videoHeight;
 
-        console.log(`Video dimensions: ${videoWidth}x${videoHeight}, Aspect: ${videoAspect}`);
-
-        // MindAR target image is a normalized 1x1 unit in the scene
-        // We want to fill this completely while maintaining video aspect ratio
         let planeWidth, planeHeight;
-
-        // Fill the target completely
-        if (videoWidth > videoHeight) {
-          // Landscape video - fill width and adjust height
+        if (videoAspect >= 1) {
           planeWidth = 1;
           planeHeight = 1 / videoAspect;
         } else {
-          // Portrait or square video - fill height and adjust width
           planeHeight = 1;
           planeWidth = videoAspect;
         }
 
-        console.log(`Plane dimensions: ${planeWidth}x${planeHeight}`);
+        while (group.children.length > 0) group.remove(group.children[0]);
 
-        // Remove any existing planes
-        while(printGroup.children.length > 0) {
-          printGroup.remove(printGroup.children[0]);
-        }
-
-        // Create video texture
         const videoTexture = new THREE.VideoTexture(video);
         videoTexture.encoding = THREE.sRGBEncoding;
 
-        // Adjust video appearance for realism
         const videoMaterial = new THREE.MeshStandardMaterial({
           map: videoTexture,
-          roughness: 0.85,  // Paper-like roughness
-          metalness: 0.0,   // No metallic look
+          roughness: 0.85,
+          metalness: 0.0,
           side: THREE.FrontSide,
           transparent: true,
-          opacity: 0.98     // Slight transparency for realism
+          opacity: 0.98
         });
 
-        // Create plane with slight offset to prevent z-fighting
         const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
         const videoPlane = new THREE.Mesh(geometry, videoMaterial);
-        videoPlane.position.z = 0.001; // Minimal offset to prevent z-fighting
+        videoPlane.position.z = 0.001;
         videoPlane.receiveShadow = true;
 
-        // Create a subtle paper texture effect underneath
         const paperGeometry = new THREE.PlaneGeometry(planeWidth * 1.02, planeHeight * 1.02);
         const paperMaterial = new THREE.MeshStandardMaterial({
           color: 0xffffff,
-          roughness: 0.9,    // Very paper-like roughness
+          roughness: 0.9,
           metalness: 0.0,
           side: THREE.DoubleSide,
           transparent: true,
@@ -182,10 +152,9 @@
         });
 
         const paperPlane = new THREE.Mesh(paperGeometry, paperMaterial);
-        paperPlane.position.z = -0.001; // Slightly behind
+        paperPlane.position.z = -0.001;
         paperPlane.receiveShadow = true;
 
-        // Add subtle bevel/edge to paper for realism
         const edgeGeometry = new THREE.BoxGeometry(planeWidth * 1.04, planeHeight * 1.04, 0.008);
         const edgeMaterial = new THREE.MeshStandardMaterial({
           color: 0xeeeeee,
@@ -198,112 +167,99 @@
         edge.receiveShadow = true;
         edge.castShadow = true;
 
-        // Add the elements to the group
-        printGroup.add(edge);
-        printGroup.add(paperPlane);
-        printGroup.add(videoPlane);
+        group.add(edge, paperPlane, videoPlane);
 
-        // Scale the entire group to fill the target image
-        // For landscape videos, scale up height to fill target's height
-        // For portrait videos, scale up width to fill target's width
-        if (videoWidth > videoHeight) {
-          // Landscape video - scale up to fill height
-          const scale = 1 / planeHeight;
-          printGroup.scale.set(scale, scale, scale);
-        } else {
-          // Portrait or square video - scale up to fill width
-          const scale = 1 / planeWidth;
-          printGroup.scale.set(scale, scale, scale);
-        }
-      }
+        const scale = 1 / Math.min(planeWidth, planeHeight);
+        group.scale.set(scale, scale, scale);
+      };
 
-      // Event listener for video to detect when metadata is loaded
-      video.addEventListener('loadedmetadata', () => {
-        console.log("Video metadata loaded");
-        createPlanes();
-      });
+      const createAnchorForTarget = (index, videoUrl) => {
+        const anchor = mindarThree.addAnchor(index);
+        const video = document.createElement("video");
+        video.src = videoUrl;
+        video.crossOrigin = "anonymous";
+        video.loop = true;
+        video.playsInline = true;
+        video.muted = false;
+        video.style.display = "none";
+        document.body.appendChild(video);
 
-      // Video control on target detection
-      anchor.onTargetFound = () => {
-        console.log("Target found");
+        const printGroup = new THREE.Group();
+        anchor.group.add(printGroup);
 
-        // Add subtle animation for appearing
-        const currentScale = printGroup.scale.x;
-        printGroup.scale.set(currentScale * 0.95, currentScale * 0.95, currentScale * 0.95);
-        printGroup.rotation.x = -0.05;
+        video.addEventListener("loadedmetadata", () => {
+          createPlanes(video, printGroup);
+        });
 
-        // Animate to normal scale
-        const targetScale = printGroup.scale.x / 0.95;
-        const appearTween = () => {
-          printGroup.scale.x += (targetScale - printGroup.scale.x) * 0.1;
-          printGroup.scale.y += (targetScale - printGroup.scale.y) * 0.1;
-          printGroup.scale.z += (targetScale - printGroup.scale.z) * 0.1;
-          printGroup.rotation.x += (0 - printGroup.rotation.x) * 0.1;
+        anchor.onTargetFound = () => {
+          const currentScale = printGroup.scale.x;
+          printGroup.scale.set(currentScale * 0.95, currentScale * 0.95, currentScale * 0.95);
+          printGroup.rotation.x = -0.05;
 
-          if (Math.abs(targetScale - printGroup.scale.x) > 0.001) {
-            requestAnimationFrame(appearTween);
-          }
+          const targetScale = currentScale;
+          const appearTween = () => {
+            printGroup.scale.x += (targetScale - printGroup.scale.x) * 0.1;
+            printGroup.scale.y += (targetScale - printGroup.scale.y) * 0.1;
+            printGroup.scale.z += (targetScale - printGroup.scale.z) * 0.1;
+            printGroup.rotation.x += (0 - printGroup.rotation.x) * 0.1;
+
+            if (Math.abs(targetScale - printGroup.scale.x) > 0.001) {
+              requestAnimationFrame(appearTween);
+            }
+          };
+
+          appearTween();
+          setTimeout(() => {
+            video.play().catch(err => console.warn("Autoplay blocked"));
+          }, 300);
         };
 
-        appearTween();
+        anchor.onTargetLost = () => {
+          video.pause();
+        };
 
-        // Play video with slight delay for realism
-        setTimeout(() => {
-          video.play().catch(e => {
-            console.warn("Autoplay blocked. User interaction may be required.");
-          });
-        }, 300);
+        let phase = 0;
+        const subtleMovement = () => {
+          phase += 0.01;
+          if (anchor.visible) {
+            printGroup.position.y = Math.sin(phase) * 0.003;
+            printGroup.rotation.z = Math.sin(phase * 0.7) * 0.003;
+            printGroup.rotation.x = Math.sin(phase * 0.5) * 0.003;
+          }
+          requestAnimationFrame(subtleMovement);
+        };
+
+        subtleMovement();
+
+        video.load();
+        anchors.push(anchor);
+        videos.push(video);
+        printGroups.push(printGroup);
       };
 
-      anchor.onTargetLost = () => {
-        console.log("Target lost");
-        video.pause();
-      };
+      Object.keys(videoMap).forEach(index => {
+        createAnchorForTarget(parseInt(index), videoMap[index]);
+      });
 
-      // Add subtle movement to simulate paper physicality
-      let phase = 0;
-      const subtleMovement = () => {
-        phase += 0.01;
-        if (anchor.visible) {
-          printGroup.position.y = Math.sin(phase) * 0.003;
-          printGroup.rotation.z = Math.sin(phase * 0.7) * 0.003;
-          printGroup.rotation.x = Math.sin(phase * 0.5) * 0.003;
-        }
-        requestAnimationFrame(subtleMovement);
-      };
-
-      subtleMovement();
-
-      // Pre-load video to get dimensions
-      video.load();
-
-      // Start AR
       const start = async () => {
         startButton.style.display = "none";
-
         try {
           await mindarThree.start();
-
           renderer.setAnimationLoop(() => {
             renderer.render(scene, camera);
           });
         } catch (err) {
-          console.error("Error starting AR:", err);
-          alert("Error starting AR experience. Please ensure camera permissions are granted and try again.");
+          alert("AR startup failed. Check camera access.");
+          console.error(err);
           startButton.style.display = "block";
         }
       };
 
       startButton.addEventListener("click", start);
-
-      // Handle resize
       window.addEventListener("resize", () => {
-        const width = window.innerWidth;
-        const height = window.innerHeight;
-        camera.aspect = width / height;
-        camera.updateProjectionMatrix();
-        renderer.setSize(width, height);
+        renderer.setSize(window.innerWidth, window.innerHeight);
       });
     </script>
+
   </body>
 </html>
